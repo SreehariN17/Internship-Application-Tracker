@@ -12,6 +12,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 python -m flask --app app init-db
+python -m flask --app app migrate-statuses
 python -m flask --app app run
 ```
 
@@ -25,7 +26,7 @@ curl -i http://127.0.0.1:5000/health
 ```
 
 Expected: HTTP 200 with `{"status":"ok"}`. This endpoint checks that the API
-is running; it does not check the database. No application CRUD routes exist yet.
+is running; it does not check the database. Application CRUD routes are described below.
 
 ## Files
 
@@ -33,6 +34,7 @@ is running; it does not check the database. No application CRUD routes exist yet
 | --- | --- |
 | `app.py` | App factory, JSON health route, and `init-db` command with readable failure messages. |
 | `database.py` | Opens and closes SQLite connections, enables foreign keys, commits successful transactions, rolls back failures, and initializes the schema. Errors propagate to the caller. |
+| `tests/test_applications.py` | Application CRUD, validation, transactions, and status migration tests. |
 | `schema.sql` | Companies, applications, and interviews tables, constraints, and foreign-key indexes. |
 | `requirements.txt` | Flask, the only direct third-party dependency; pip installs its dependencies automatically. SQLite and unittest are included in Python. |
 | `.gitignore` | Excludes the virtual environment, local databases, secrets files, and Python cache files. |
@@ -47,8 +49,9 @@ existing company. Each application can have many interviews, and each interview
 must reference an existing application. Deleting a company with applications or
 an application with interviews is restricted. This is a single-user app; no users
 table or authentication is needed. Company websites and application notes are optional.
-Application statuses are `applied`, `interviewing`, `offer`, `rejected`, and
-`withdrawn`. `applied_date` is a text date, defaulting to today's UTC date in
+API statuses are `Applied`, `Assessment`, `Interview`, `Offer`,
+`Rejected`, and `Withdrawn`. Legacy lowercase database values remain supported
+and are displayed with the API labels. New API writes require the exact labels above. `applied_date` is a text date, defaulting to today's UTC date in
 `YYYY-MM-DD` format. Store interview dates as ISO 8601 text (for example,
 `2026-11-20T14:00:00-05:00`) and types as text (for example, `technical`
 or `behavioral`). Future routes should validate dates; SQLite does not enforce
@@ -98,3 +101,74 @@ validation/tests. Agree on request and response shapes together. In week two,
 add JOIN-based application listings, status filtering, integration tests, and
 documentation. Keep authentication, frontend work, and additional frameworks
 outside this initial scope.
+
+## Application API (Step C)
+
+For a fresh database, run `init-db`. For an existing database with the original
+status constraint, back it up and run:
+
+```sh
+python -m flask --app app migrate-statuses
+```
+
+This explicit, repeatable migration expands only the application status choices.
+It preserves company, application, and interview records, IDs, and relationships.
+It rebuilds the two related tables together in a transaction because SQLite
+cannot alter a CHECK constraint directly. Foreign keys stay enabled. Initialization
+alone does not migrate old constraints. The migration targets this project's
+original schema; custom tables, indexes, and triggers need a separate migration.
+
+| Method and path | Behavior | Success |
+| --- | --- | --- |
+| GET /applications | List applications with company names using a JOIN, newest applied_date first; higher ID breaks date ties. | 200 |
+| GET /applications/1 | Get one application with its company name. | 200 |
+| POST /applications | Create an application and reuse or create its company. | 201 |
+| PATCH /applications/1 | Update only the supplied fields. | 200 |
+| DELETE /applications/1 | Delete an application if it has no interviews; keep its company. | 204, empty body |
+
+POST requires `company_name`, `position`, `status`, and `applied_date`.
+`notes` is optional and accepts text or null. PATCH accepts any non-empty subset
+of those five fields; unknown fields are rejected. Company names and positions
+are trimmed. Company matching ignores surrounding whitespace and capitalization
+(including Unicode case folding). Existing duplicates are not removed; the
+oldest matching company is reused. Dates must be real calendar dates written
+exactly as YYYY-MM-DD. Status labels are case-sensitive.
+
+Writes use one transaction for company lookup/creation and application changes.
+An immediate SQLite transaction serializes writes so simultaneous API requests
+do not create the same company. No company management endpoints are included.
+
+Example requests (start the Flask server first):
+
+```sh
+curl -i -X POST http://127.0.0.1:5000/applications \
+  -H 'Content-Type: application/json' \
+  -d '{"company_name":"Example","position":"Backend Intern","status":"Applied","applied_date":"2026-11-17","notes":"Referral"}'
+
+curl http://127.0.0.1:5000/applications
+curl http://127.0.0.1:5000/applications/1
+
+curl -X PATCH http://127.0.0.1:5000/applications/1 \
+  -H 'Content-Type: application/json' \
+  -d '{"status":"Interview"}'
+
+curl -i -X DELETE http://127.0.0.1:5000/applications/1
+```
+
+POST returns 201, a Location header such as /applications/1, and:
+
+```json
+{"application":{"id":1,"company_id":1,"company_name":"Example","position":"Backend Intern","status":"Applied","applied_date":"2026-11-17","notes":"Referral"}}
+```
+
+Single GET and PATCH return the same object envelope. PATCH returns updated values.
+The list returns `{"applications":[...]}`, or `{"applications":[]}` when empty.
+IDs depend on existing records; use the ID returned by POST in later requests.
+
+Errors consistently use an `error` field:
+
+- 400: invalid JSON/body, missing/unknown fields, invalid status or date.
+- 404: `{"error":"Application not found."}`
+- 409: `{"error":"Application has related interviews and cannot be deleted."}`
+- 500: `{"error":"Database operation failed."}` for unexpected database errors;
+  internal details are logged only on the server.

@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS applications (
     company_id INTEGER NOT NULL,
     position TEXT NOT NULL CHECK (length(trim(position)) > 0),
     status TEXT NOT NULL DEFAULT 'applied'
-        CHECK (status IN ('applied', 'interviewing', 'offer', 'rejected', 'withdrawn')),
+        CHECK (status IN ('Applied', 'Assessment', 'Interview', 'Offer', 'Rejected', 'Withdrawn',
+                            'applied', 'interviewing', 'offer', 'rejected', 'withdrawn')),
     applied_date TEXT NOT NULL DEFAULT (date('now')),
     notes TEXT,
     FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE RESTRICT
