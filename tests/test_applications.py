@@ -47,6 +47,58 @@ class ApplicationTests(unittest.TestCase):
         with connect_db(self.path) as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM companies").fetchone()[0], 1)
 
+    def test_list_without_filter_includes_all_statuses(self):
+        created = [self.create(status=status).json["application"] for status in STATUSES]
+        response = self.client.get("/applications")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, {"applications": list(reversed(created))})
+
+    def test_filter_each_valid_status(self):
+        created = {status: self.create(status=status).json["application"] for status in STATUSES}
+        for status in STATUSES:
+            with self.subTest(status=status):
+                response = self.client.get("/applications", query_string={"status": status})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json, {"applications": [created[status]]})
+
+    def test_filter_without_matches(self):
+        self.create(status="Applied")
+        response = self.client.get("/applications?status=Interview")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, {"applications": []})
+
+    def test_filter_rejects_invalid_or_empty_status(self):
+        self.create()
+        for status in ("", " ", "interviewing", "applied", "Unknown", "Interview ",
+                       "Interview' OR 1=1 --"):
+            with self.subTest(status=status):
+                response = self.client.get("/applications", query_string={"status": status})
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("error", response.json)
+        self.assertEqual(self.client.get("/applications?status").status_code, 400)
+
+    def test_filter_includes_legacy_statuses(self):
+        legacy_statuses = {"applied": "Applied", "interviewing": "Interview", "offer": "Offer",
+                           "rejected": "Rejected", "withdrawn": "Withdrawn"}
+        for legacy, current in legacy_statuses.items():
+            modern = self.create(status=current).json["application"]
+            old = self.create(status=current).json["application"]
+            with connect_db(self.path) as connection:
+                connection.execute("UPDATE applications SET status = ? WHERE id = ?", (legacy, old["id"]))
+            with self.subTest(status=current):
+                response = self.client.get("/applications", query_string={"status": current})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json, {"applications": [old, modern]})
+
+    def test_filter_preserves_ordering_and_company_names(self):
+        older = self.create(status="Interview", company_name="First", applied_date="2026-01-01").json["application"]
+        newer = self.create(status="Interview", company_name="Second").json["application"]
+        tied = self.create(status="Interview", company_name="Third").json["application"]
+        self.create(status="Offer", company_name="Excluded", applied_date="2026-12-01")
+        response = self.client.get("/applications?status=Interview")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, {"applications": [tied, newer, older]})
+
     def test_all_statuses(self):
         for status in STATUSES:
             with self.subTest(status=status):

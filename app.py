@@ -88,10 +88,22 @@ def create_app(test_config=None):
 
     @app.get("/applications")
     def list_applications():
+        status = request.args.get("status")
+        if status is not None and status not in STATUSES:
+            return jsonify(error="status must be one of: " + ", ".join(STATUSES)), 400
+
+        query = APPLICATION_SELECT
+        parameters = []
+        if status is not None:
+            # Include old stored labels that represent the requested API status.
+            parameters = [status] + [
+                legacy for legacy, current in LEGACY_STATUSES.items() if current == status
+            ]
+            placeholders = ", ".join("?" for _ in parameters)
+            query += f" WHERE a.status IN ({placeholders})"
+        query += " ORDER BY a.applied_date DESC, a.id DESC"
         with connect_db(app.config["DATABASE"]) as connection:
-            rows = connection.execute(
-                APPLICATION_SELECT + " ORDER BY a.applied_date DESC, a.id DESC"
-            ).fetchall()
+            rows = connection.execute(query, parameters).fetchall()
         return jsonify(applications=[application_json(row) for row in rows])
 
     @app.get("/applications/<int:application_id>")
