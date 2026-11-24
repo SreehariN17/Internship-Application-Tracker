@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ScarletTrack | Internship Application Tracker</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="{{ url_for('static', filename='script.js') }}" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="{{ url_for('dashboard') }}" aria-label="ScarletTrack home">
+        <span class="brand-mark" aria-hidden="true">ST</span>
+        <span>ScarletTrack</span>
+      </a>
+      <span class="tagline">Your career journey starts here.</span>
+    </div>
+  </header>
+
+  <main class="dashboard">
+    <header class="page-heading">
+      <p class="eyebrow">YOUR NEXT CHAPTER</p>
+      <h1>Your career dashboard</h1>
+      <p class="description">Big ambitions start with small steps. Organize your internship search, follow your progress, and make room for your next opportunity.</p>
+    </header>
+
+    <p id="success-notification" class="notification" role="status" aria-live="polite" hidden></p>
+
+    <section class="applications-card" aria-labelledby="applications-heading" aria-busy="true" id="applications-panel">
+      <div class="card-heading">
+        <div>
+          <h2 id="applications-heading">Your applications</h2>
+          <p class="sort-label">Every opportunity, in one place · Newest first</p>
+        </div>
+        <button id="add-application" class="button button-primary" type="button" aria-haspopup="dialog" aria-controls="application-dialog">
+          <span aria-hidden="true">＋</span> Add Application
+        </button>
+      </div>
+
+      <div id="loading-state" class="state" role="status">
+        <span class="loading-dot" aria-hidden="true"></span>
+        <p>Loading your applications…</p>
+      </div>
+      <div id="empty-state" class="state" hidden>
+        <span class="state-symbol" aria-hidden="true">↗</span>
+        <h3>Your next opportunity starts here</h3>
+        <p>No applications yet. Use Add Application to take your first step.</p>
+      </div>
+      <div id="error-state" class="state error-state" role="alert" hidden></div>
+
+      <div id="table-container" class="table-container" role="region" aria-label="Applications table; scroll horizontally on small screens" tabindex="0" hidden>
+        <table>
+          <caption class="visually-hidden">Internship applications, ordered by applied date from newest to oldest.</caption>
+          <thead>
+            <tr>
+              <th scope="col">Company</th>
+              <th scope="col">Position</th>
+              <th scope="col">Status</th>
+              <th scope="col">Applied Date</th>
+              <th scope="col">Notes</th>
+            </tr>
+          </thead>
+          <tbody id="applications-body"></tbody>
+        </table>
+      </div>
+      <noscript><p class="noscript-message">Enable JavaScript to load your applications.</p></noscript>
+    </section>
+    <footer class="page-footer">Built by Rutgers students, for students.</footer>
+  </main>
+  <dialog id="application-dialog" aria-labelledby="dialog-title" aria-describedby="dialog-description">
+    <div class="modal-heading">
+      <div>
+        <p class="eyebrow">ONE STEP CLOSER</p>
+        <h2 id="dialog-title">Add an application</h2>
+      </div>
+      <button id="close-dialog" class="close-button" type="button" aria-label="Close add application dialog">×</button>
+    </div>
+    <p id="dialog-description" class="modal-description">Keep your next opportunity on the radar. Fields marked * are required.</p>
+    <form id="application-form">
+      <p id="form-error" class="form-error" role="alert" tabindex="-1" hidden></p>
+      <fieldset id="form-fields">
+        <legend class="visually-hidden">Application details</legend>
+        <div class="form-field">
+          <label for="company-name">Company Name <span aria-hidden="true">*</span></label>
+          <input id="company-name" name="company_name" type="text" placeholder="e.g. Acme Labs" required autofocus>
+        </div>
+        <div class="form-field">
+          <label for="position">Position <span aria-hidden="true">*</span></label>
+          <input id="position" name="position" type="text" placeholder="e.g. Software Engineering Intern" required>
+        </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label for="status">Status <span aria-hidden="true">*</span></label>
+            <select id="status" name="status" required>
+              <option value="Applied" selected>Applied</option>
+              <option value="Assessment">Assessment</option>
+              <option value="Interview">Interview</option>
+              <option value="Offer">Offer</option>
+              <option value="Rejected">Rejected</option>
+              <option value="Withdrawn">Withdrawn</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="applied-date">Applied Date <span aria-hidden="true">*</span></label>
+            <input id="applied-date" name="applied_date" type="date" required>
+          </div>
+        </div>
+        <div class="form-field">
+          <label for="notes">Notes <span class="optional">(optional)</span></label>
+          <textarea id="notes" name="notes" rows="3" placeholder="A referral, a connection, or something to remember…"></textarea>
+        </div>
+      </fieldset>
+      <div class="modal-actions">
+        <button id="cancel-dialog" class="button button-secondary" type="button">Cancel</button>
+        <button id="submit-application" class="button button-primary" type="submit">Save Application</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>
