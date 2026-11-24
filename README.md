@@ -21,6 +21,18 @@ The initialization command creates `instance/tracker.db` and missing tables.
 It preserves existing data; it does not migrate changed table definitions.
 The development server runs at `http://127.0.0.1:5000`. Stop it with Ctrl+C.
 
+Open `http://127.0.0.1:5000/` in your browser to view the dashboard.
+The ScarletTrack dashboard loads existing applications automatically. Use
+**Add Application** to open a form, enter the company and position, select a
+status, and save. Applied Date defaults to today's local date; notes are optional.
+The form sends JSON to `POST /applications`, then reloads `GET /applications`
+after a successful save. Failed requests leave your inputs in place and show
+an error. Submission is disabled while saving to prevent duplicate requests.
+JavaScript fetches `GET /applications`, reads its `applications` array, and
+renders rows with `textContent` in the order returned by the API. Null notes
+appear as an em dash. Loading, empty, and failed-request messages are included.
+On small screens, scroll the table horizontally to view all five columns.
+
 ```sh
 curl -i http://127.0.0.1:5000/health
 ```
@@ -33,6 +45,10 @@ is running; it does not check the database. Application CRUD routes are describe
 | File | Purpose |
 | --- | --- |
 | `app.py` | App factory, JSON health route, and `init-db` command with readable failure messages. |
+| `templates/index.html` | Dashboard page with the applications table and loading, empty, and error states. |
+| `static/style.css` | Light dashboard styling, distinct status colors, and a responsive table container. |
+| `static/script.js` | Fetches `/applications` and safely displays its JSON data using `textContent`. |
+| `tests/test_frontend.py` | Checks the dashboard title, page response, asset links, and static file delivery. |
 | `database.py` | Opens and closes SQLite connections, enables foreign keys, commits successful transactions, rolls back failures, and initializes the schema. Errors propagate to the caller. |
 | `tests/test_applications.py` | Application CRUD, validation, transactions, and status migration tests. |
 | `schema.sql` | Companies, applications, and interviews tables, constraints, and foreign-key indexes. |
@@ -94,12 +110,38 @@ python -m unittest discover -s tests -v
 
 Tests use temporary databases and do not modify `instance/tracker.db`.
 
+### Manual dashboard checklist
+
+Start the server using the setup commands and open `http://127.0.0.1:5000/`.
+Manual form submissions create real application records in your configured database.
+
+- Check ScarletTrack branding, the tagline, scarlet buttons, company initials,
+  status text/colors, and the student-built footer.
+- Open Add Application. Verify Applied is selected and the date matches your
+  local calendar. Check all six statuses and optional notes.
+- Use Tab and Shift+Tab to navigate within the dialog. Check initial company-field
+  focus, Escape, Cancel, and Close; focus should return to Add Application.
+- Submit empty fields, whitespace-only company/position, and an invalid date;
+  verify validation prevents saving.
+- Save a valid application. Check the saving state, success message, closed/reset
+  form, and refreshed table. Double-click Save and check that only one POST occurs.
+- In browser developer tools, go offline after opening the form and submit.
+  Check the error, preserved inputs, and enabled Save button; restore connectivity.
+  A backend error should also appear as plain text without clearing the form.
+- Check notes such as `<b>hello</b>` display literally as text. Check empty notes
+  display an em dash and company names with multiple words have initials.
+- Test desktop and narrow mobile widths (for example, 375px): table scrolling,
+  full-width Add button, stacked form fields, scrollable dialog, and visible actions.
+- Verify existing loading/empty/error states and that status remains understandable
+  without relying on color. No interview, statistics, edit/delete, or filter controls
+  should appear.
+
 ## Two-week scope
 
 In week one, split work across company routes, application routes, and
 validation/tests. Agree on request and response shapes together. In week two,
 add JOIN-based application listings, status filtering, integration tests, and
-documentation. Keep authentication, frontend work, and additional frameworks
+documentation. Keep authentication and additional frameworks
 outside this initial scope.
 
 ## Application API (Step C)
