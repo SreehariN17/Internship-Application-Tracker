@@ -110,3 +110,20 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; }
 }
+
+/* Optional resource links stay compact in the table and collapsed in the form. */
+.resource-fields { border-top: 1px solid #e2e5eb; padding: 16px 0 20px; }
+summary { cursor: pointer; }
+.resource-fields > summary { font-size: 14px; font-weight: 650; color: #172033; }
+.resource-help { font-size: 12px; color: #63738a; margin: 12px 0 18px; }
+.email-heading { font-size: 14px; margin: 18px 0 0; }
+.email-link-row { padding: 14px; background: #f7f8fa; border: 1px solid #e2e5eb; border-radius: 10px; margin-bottom: 14px; }
+.email-link-row .form-field { margin-bottom: 12px; }
+.remove-email { font-size: 12px; padding: 7px 12px; }
+.resources-cell { min-width: 170px; }
+.resource-links { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; font-size: 12px; }
+.resource-links a { color: #a8002a; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.resource-links a:hover { color: #76001e; }
+.email-panel summary { font-weight: 600; color: #a8002a; }
+.email-panel ul { margin: 8px 0 0; padding-left: 18px; }
+.email-panel li { margin: 6px 0; }

@@ -76,6 +76,20 @@ class FrontendTests(unittest.TestCase):
                          ["Applied", "Assessment", "Interview", "Offer", "Rejected", "Withdrawn"])
         self.assertEqual([option["value"] for option in options if "selected" in option], ["Applied"])
 
+    def test_optional_resources_section(self):
+        elements = self.parse_dashboard().elements
+        self.assertEqual(elements["resource-fields"][0], "details")
+        self.assertNotIn("open", elements["resource-fields"][1])
+        for field_id in ("job-posting-url", "application-portal-url"):
+            self.assertEqual(elements[field_id][1]["type"], "url")
+            self.assertEqual(elements[field_id][1]["maxlength"], "2048")
+            self.assertNotIn("required", elements[field_id][1])
+        self.assertEqual(elements["add-email-link"][1]["type"], "button")
+        self.assertIn("email-link-rows", elements)
+        html = self.client.get("/").get_data(as_text=True)
+        self.assertIn("Application Resources (Optional)", html)
+        self.assertIn('<th scope="col">Resources</th>', html)
+
     def test_dashboard_links_static_assets(self):
         html = self.client.get("/").get_data(as_text=True)
         self.assertIn('href="/static/style.css"', html)

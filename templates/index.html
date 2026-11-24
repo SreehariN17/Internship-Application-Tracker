@@ -59,6 +59,7 @@
               <th scope="col">Status</th>
               <th scope="col">Applied Date</th>
               <th scope="col">Notes</th>
+              <th scope="col">Resources</th>
             </tr>
           </thead>
           <tbody id="applications-body"></tbody>
@@ -110,6 +111,22 @@
           <label for="notes">Notes <span class="optional">(optional)</span></label>
           <textarea id="notes" name="notes" rows="3" placeholder="A referral, a connection, or something to remember…"></textarea>
         </div>
+        <details id="resource-fields" class="resource-fields">
+          <summary>Application Resources (Optional)</summary>
+          <p class="resource-help">Keep useful links together. Only HTTP or HTTPS web links are supported; links open in a new tab.</p>
+          <div class="form-field">
+            <label for="job-posting-url">Original Job Posting URL</label>
+            <input id="job-posting-url" name="job_posting_url" type="url" maxlength="2048" placeholder="https://example.com/jobs/123">
+          </div>
+          <div class="form-field">
+            <label for="application-portal-url">Application Portal URL</label>
+            <input id="application-portal-url" name="application_portal_url" type="url" maxlength="2048" placeholder="https://example.com/candidate-portal">
+          </div>
+          <h3 class="email-heading">Important Emails</h3>
+          <p id="resource-help" class="resource-help">Copy an email’s web address from Gmail, Outlook, or another webmail service. Add up to 20 links with labels you recognize.</p>
+          <div id="email-link-rows"></div>
+          <button id="add-email-link" class="button button-secondary" type="button">Add another email link</button>
+        </details>
       </fieldset>
       <div class="modal-actions">
         <button id="cancel-dialog" class="button button-secondary" type="button">Cancel</button>

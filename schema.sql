@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS applications (
                             'applied', 'interviewing', 'offer', 'rejected', 'withdrawn')),
     applied_date TEXT NOT NULL DEFAULT (date('now')),
     notes TEXT,
+    job_posting_url TEXT,
+    application_portal_url TEXT,
     FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE RESTRICT
 );
 
@@ -33,3 +35,14 @@ CREATE TABLE IF NOT EXISTS interviews (
 
 CREATE INDEX IF NOT EXISTS idx_interviews_application_id
     ON interviews(application_id);
+
+CREATE TABLE IF NOT EXISTS application_email_links (
+    id INTEGER PRIMARY KEY,
+    application_id INTEGER NOT NULL,
+    label TEXT NOT NULL CHECK (length(trim(label)) BETWEEN 1 AND 120),
+    url TEXT NOT NULL CHECK (length(trim(url)) BETWEEN 1 AND 2048),
+    FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_application_email_links_application_id
+    ON application_email_links(application_id);

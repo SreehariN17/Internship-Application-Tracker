@@ -8,7 +8,8 @@ import click
 from flask import Flask, jsonify, render_template, request
 from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 
-from database import connect_db, init_db, migrate_statuses
+from database import connect_db, init_db, migrate_resources, migrate_statuses
+from resource_links import RESOURCE_FIELDS, load_email_links, replace_email_links, validate_resources
 
 
 STATUSES = ("Applied", "Assessment", "Interview", "Offer", "Rejected", "Withdrawn")
@@ -16,15 +17,23 @@ LEGACY_STATUSES = {"applied": "Applied", "interviewing": "Interview", "offer": "
                    "rejected": "Rejected", "withdrawn": "Withdrawn"}
 APPLICATION_SELECT = (
     "SELECT a.id, a.company_id, c.name AS company_name, a.position, "
-    "a.status, a.applied_date, a.notes FROM applications AS a "
+    "a.status, a.applied_date, a.notes, a.job_posting_url, a.application_portal_url "
+    "FROM applications AS a "
     "JOIN companies AS c ON c.id = a.company_id"
 )
 
 
-def application_json(row):
+def application_json(row, email_links=None):
     result = dict(row)
     result["status"] = LEGACY_STATUSES.get(result["status"], result["status"])
+    result["email_links"] = email_links if email_links is not None else []
     return result
+
+
+def application_results(connection, rows):
+    """Attach email links with a batch query while keeping API wrappers unchanged."""
+    links = load_email_links(connection, [row["id"] for row in rows])
+    return [application_json(row, links.get(row["id"], [])) for row in rows]
 
 
 def validated_body(partial=False):
@@ -35,10 +44,10 @@ def validated_body(partial=False):
         raise ValueError("Send a valid JSON object with Content-Type: application/json.") from error
     if not isinstance(data, dict) or not data:
         raise ValueError("Request body must be a non-empty JSON object.")
-    fields = {"company_name", "position", "status", "applied_date", "notes"}
+    fields = {"company_name", "position", "status", "applied_date", "notes"} | RESOURCE_FIELDS
     if data.keys() - fields:
         raise ValueError("Unknown fields: " + ", ".join(sorted(data.keys() - fields)))
-    required = fields - {"notes"}
+    required = {"company_name", "position", "status", "applied_date"}
     if not partial and required - data.keys():
         raise ValueError("Missing required fields: " + ", ".join(sorted(required - data.keys())))
     for field in required & data.keys():
@@ -58,6 +67,7 @@ def validated_body(partial=False):
             raise ValueError("applied_date must be a valid date in YYYY-MM-DD format.") from error
     if "notes" in data and data["notes"] is not None and not isinstance(data["notes"], str):
         raise ValueError("notes must be a string or null.")
+    validate_resources(data)
     return data
 
 
@@ -109,15 +119,17 @@ def create_app(test_config=None):
         query += " ORDER BY a.applied_date DESC, a.id DESC"
         with connect_db(app.config["DATABASE"]) as connection:
             rows = connection.execute(query, parameters).fetchall()
-        return jsonify(applications=[application_json(row) for row in rows])
+            applications = application_results(connection, rows)
+        return jsonify(applications=applications)
 
     @app.get("/applications/<int:application_id>")
     def get_application(application_id):
         with connect_db(app.config["DATABASE"]) as connection:
             row = connection.execute(APPLICATION_SELECT + " WHERE a.id = ?", (application_id,)).fetchone()
-        if row is None:
-            return jsonify(error="Application not found."), 404
-        return jsonify(application=application_json(row))
+            if row is None:
+                return jsonify(error="Application not found."), 404
+            application = application_results(connection, [row])[0]
+        return jsonify(application=application)
 
     @app.post("/applications")
     def create_application():
@@ -130,12 +142,15 @@ def create_app(test_config=None):
             connection.execute("BEGIN IMMEDIATE")
             company_id = company_id_for(connection, data["company_name"])
             cursor = connection.execute(
-                "INSERT INTO applications (company_id, position, status, applied_date, notes) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (company_id, data["position"], data["status"], data["applied_date"], data.get("notes")),
+                "INSERT INTO applications (company_id, position, status, applied_date, notes, "
+                "job_posting_url, application_portal_url) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (company_id, data["position"], data["status"], data["applied_date"], data.get("notes"),
+                 data.get("job_posting_url"), data.get("application_portal_url")),
             )
+            replace_email_links(connection, cursor.lastrowid, data.get("email_links", []))
             row = connection.execute(APPLICATION_SELECT + " WHERE a.id = ?", (cursor.lastrowid,)).fetchone()
-        return jsonify(application=application_json(row)), 201, {"Location": f"/applications/{row['id']}"}
+            application = application_results(connection, [row])[0]
+        return jsonify(application=application), 201, {"Location": f"/applications/{row['id']}"}
 
     @app.patch("/applications/<int:application_id>")
     def update_application(application_id):
@@ -149,14 +164,19 @@ def create_app(test_config=None):
                 return jsonify(error="Application not found."), 404
             if "company_name" in data:
                 data["company_id"] = company_id_for(connection, data.pop("company_name"))
+            email_links = data.pop("email_links", None)
             # Column names come only from validated fields above; all values are bound.
-            assignments = ", ".join(f"{field} = ?" for field in data)
-            connection.execute(
-                f"UPDATE applications SET {assignments} WHERE id = ?",
-                (*data.values(), application_id),
-            )
+            if data:
+                assignments = ", ".join(f"{field} = ?" for field in data)
+                connection.execute(
+                    f"UPDATE applications SET {assignments} WHERE id = ?",
+                    (*data.values(), application_id),
+                )
+            if email_links is not None:
+                replace_email_links(connection, application_id, email_links)
             row = connection.execute(APPLICATION_SELECT + " WHERE a.id = ?", (application_id,)).fetchone()
-        return jsonify(application=application_json(row))
+            application = application_results(connection, [row])[0]
+        return jsonify(application=application)
 
     @app.delete("/applications/<int:application_id>")
     def delete_application(application_id):
@@ -168,6 +188,15 @@ def create_app(test_config=None):
                 return jsonify(error="Application has related interviews and cannot be deleted."), 409
             connection.execute("DELETE FROM applications WHERE id = ?", (application_id,))
         return "", 204
+
+    @app.cli.command("migrate-resources")
+    def migrate_resources_command():
+        """Add optional application resources to an existing database."""
+        try:
+            migrate_resources(app.config["DATABASE"])
+        except (sqlite3.Error, OSError, ValueError) as error:
+            raise click.ClickException(f"Resource migration failed: {error}") from error
+        click.echo("Resource migration complete.")
 
     @app.cli.command("migrate-statuses")
     def migrate_statuses_command():

@@ -13,6 +13,7 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 python -m flask --app app init-db
 python -m flask --app app migrate-statuses
+python -m flask --app app migrate-resources
 python -m flask --app app run
 ```
 
@@ -31,7 +32,7 @@ an error. Submission is disabled while saving to prevent duplicate requests.
 JavaScript fetches `GET /applications`, reads its `applications` array, and
 renders rows with `textContent` in the order returned by the API. Null notes
 appear as an em dash. Loading, empty, and failed-request messages are included.
-On small screens, scroll the table horizontally to view all five columns.
+On small screens, scroll the table horizontally to view all columns.
 
 ```sh
 curl -i http://127.0.0.1:5000/health
@@ -50,6 +51,8 @@ is running; it does not check the database. Application CRUD routes are describe
 | `static/script.js` | Fetches `/applications` and safely displays its JSON data using `textContent`. |
 | `tests/test_frontend.py` | Checks the dashboard title, page response, asset links, and static file delivery. |
 | `database.py` | Opens and closes SQLite connections, enables foreign keys, commits successful transactions, rolls back failures, and initializes the schema. Errors propagate to the caller. |
+| `resource_links.py` | Resource URL validation, email replacement, and batched email reads. |
+| `tests/test_resources.py` | Resource API behavior and migrations tested only on temporary SQLite databases. |
 | `tests/test_applications.py` | Application CRUD, validation, transactions, and status migration tests. |
 | `schema.sql` | Companies, applications, and interviews tables, constraints, and foreign-key indexes. |
 | `requirements.txt` | Flask, the only direct third-party dependency; pip installs its dependencies automatically. SQLite and unittest are included in Python. |
@@ -155,10 +158,13 @@ python -m flask --app app migrate-statuses
 
 This explicit, repeatable migration expands only the application status choices.
 It preserves company, application, and interview records, IDs, and relationships.
-It rebuilds the two related tables together in a transaction because SQLite
-cannot alter a CHECK constraint directly. Foreign keys stay enabled. Initialization
-alone does not migrate old constraints. The migration targets this project's
-original schema; custom tables, indexes, and triggers need a separate migration.
+It rebuilds only the applications table because SQLite cannot alter a CHECK
+constraint directly. It preserves all existing columns, application indexes and
+triggers, and dependent interview/email records. Foreign keys are disabled only
+on the migration connection before its transaction, preventing accidental cascade
+deletions; integrity is checked before commit and enforcement restored afterward.
+Normal app connections always enable foreign keys. Initialization alone does not
+migrate old constraints. Unsupported custom schemas fail without committing changes.
 
 | Method and path | Behavior | Success |
 | --- | --- | --- |
@@ -169,8 +175,9 @@ original schema; custom tables, indexes, and triggers need a separate migration.
 | DELETE /applications/1 | Delete an application if it has no interviews; keep its company. | 204, empty body |
 
 POST requires `company_name`, `position`, `status`, and `applied_date`.
-`notes` is optional and accepts text or null. PATCH accepts any non-empty subset
-of those five fields; unknown fields are rejected. Company names and positions
+`notes` is optional and accepts text or null. The resource fields described below
+are also optional. PATCH accepts any non-empty subset of supported fields;
+unknown fields are rejected. Company names and positions
 are trimmed. Company matching ignores surrounding whitespace and capitalization
 (including Unicode case folding). Existing duplicates are not removed; the
 oldest matching company is reused. Dates must be real calendar dates written
@@ -214,3 +221,134 @@ Errors consistently use an `error` field:
 - 409: `{"error":"Application has related interviews and cannot be deleted."}`
 - 500: `{"error":"Database operation failed."}` for unexpected database errors;
   internal details are logged only on the server.
+
+## Application resources (Task 5B)
+
+Each application can store an original job posting, an application status portal,
+and up to 20 labeled email web links. The Add Application form keeps these in a
+collapsed **Application Resources (Optional)** section. Blank email rows are
+ignored; partially completed rows must be completed or removed. The table shows
+only available resources. Expand **Important Emails (N)** to view saved labels.
+External links open in new tabs with `noopener noreferrer`. No external pages
+are fetched, scraped, monitored, or synchronized by this app.
+
+### Migration instructions for an existing database
+
+Stop the Flask server and review the changes first. These commands operate on
+the default `instance/tracker.db`; migrations were tested only on temporary
+databases during development. They have **not** been applied to your local database.
+
+Activate the virtual environment and create a uniquely named SQLite backup:
+
+```sh
+source .venv/bin/activate
+python - <<'PY'
+from pathlib import Path
+from uuid import uuid4
+from database import connect_db
+
+source_path = Path("instance/tracker.db").resolve()
+if not source_path.is_file():
+    raise SystemExit("Existing database not found; use init-db for a fresh database.")
+backup_path = source_path.with_name(f"tracker-before-resources-{uuid4().hex}.db")
+with connect_db(source_path) as source:
+    with connect_db(backup_path) as backup:
+        source.backup(backup)
+print(f"Backup saved: {backup_path}")
+PY
+python -m flask --app app migrate-statuses
+python -m flask --app app migrate-resources
+```
+
+Both migration commands are idempotent and safe in either order. The resource
+migration inspects `PRAGMA table_info(applications)` and uses `ALTER TABLE ADD COLUMN`
+only for missing URL columns, then creates the email table/index if absent. All
+changes occur in a transaction; integrity failures roll back the migration.
+It preserves application IDs, company records, statuses, notes, and interviews.
+The status migration also preserves resources if they already exist, avoiding
+`ON DELETE CASCADE` losses during its parent-table replacement.
+
+Verify integrity and then restart the server:
+
+```sh
+python - <<'PY'
+from database import connect_db
+with connect_db("instance/tracker.db") as connection:
+    assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    violations = connection.execute("PRAGMA foreign_key_check").fetchall()
+    assert not violations, [tuple(row) for row in violations]
+    print("Foreign keys enabled; no integrity violations.")
+PY
+python -m flask --app app run
+```
+
+For a genuinely new database, `python -m flask --app app init-db` includes the
+resource columns, email table, constraints, and index automatically. Do not
+delete an existing database to upgrade it.
+
+### API fields and validation
+
+Existing requests and response wrappers continue to work. Each returned application
+now also contains `job_posting_url` and `application_portal_url` (null when missing)
+and `email_links` (an empty array when missing). Emails contain `label` and `url`
+in saved order. Lists still use the company JOIN, date/ID ordering, and existing
+status filter. Email reads are batched rather than performed once per application.
+
+- URLs: HTTP or HTTPS, absolute, with a valid hostname; maximum 2048 characters.
+  Credentials, unsupported schemes, whitespace inside URLs, bad ports, and malformed
+  URLs are rejected with HTTP 400. Surrounding whitespace is trimmed.
+- Posting/portal URLs accept null or blank strings to clear them.
+- Email entries must contain exactly `label` and `url`; labels are trimmed,
+  nonempty, and at most 120 characters. Up to 20 entries are allowed.
+- PATCH preserves omitted fields. Providing `email_links` replaces the entire
+  collection atomically; `[]` clears it. Application/company changes and email
+  replacements roll back together if any write fails.
+- Deleting an application cascades to its emails. Existing interview references
+  still prevent deletion with HTTP 409; those email links remain intact.
+
+Example POST body (send to `/applications` with `Content-Type: application/json`):
+
+```json
+{
+  "company_name": "Goldman Sachs",
+  "position": "Engineering Summer Analyst",
+  "status": "Assessment",
+  "applied_date": "2026-11-23",
+  "notes": "Complete assessment before deadline",
+  "job_posting_url": "https://example.com/jobs/123",
+  "application_portal_url": "https://example.com/applications",
+  "email_links": [
+    {"label": "Assessment invitation", "url": "https://mail.google.com/mail/u/0/#inbox/example"},
+    {"label": "Recruiter follow-up", "url": "https://outlook.office.com/mail/inbox/id/example"}
+  ]
+}
+```
+
+### Adding email links manually and privacy
+
+Open the message in Gmail, Outlook, or another webmail service, copy its address
+from the browser address bar, and paste it with a descriptive label. Use the
+message's web URL, not a `mailto:` address. Opening a saved link may require being
+signed into the same email account/profile; links can expire or change. These
+example URLs are placeholders, not working messages. No email access is granted
+to ScarletTrack, and it cannot read messages or automatically track status.
+
+URLs and labels are stored as plain text in SQLite and backups. They can reveal
+email message identifiers, private portal paths, or tokens. Avoid password-reset
+links, sign-in links, and URLs with sensitive access tokens. This single-user app
+has no authentication or encrypted storage: anyone with access to the app/database
+can see saved resources. Keep it local and do not share databases or backups.
+
+### Manual resource checklist
+
+- Create an application with the resources section untouched; save successfully.
+- Add a posting URL, portal URL, and multiple labeled emails. Add/remove a blank
+  row; confirm blank rows are ignored and partial rows show a validation error.
+- Confirm resource values remain after a failed request and dynamic rows reset
+  after a successful save. Check keyboard navigation within the scrollable dialog.
+- Confirm Job Posting/Check Status open in new tabs. Expand Important Emails
+  using keyboard Enter/Space and open labeled links; check the email count.
+- Check links/labels such as `<b>Invitation</b>` render as plain text. Unsafe
+  schemes such as `javascript:` must not save or become clickable.
+- Check narrow mobile layouts and horizontal table scrolling. No interview,
+  statistics, search, filter, edit, or delete UI is included.
