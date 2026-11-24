@@ -111,6 +111,23 @@ def create_app(test_config=None):
             rows = connection.execute(query, parameters).fetchall()
         return jsonify(applications=[application_json(row) for row in rows])
 
+    @app.get("/statistics")
+    def statistics():
+        """Return application totals, including a count for every API status."""
+        with connect_db(app.config["DATABASE"]) as connection:
+            rows = connection.execute(
+                "SELECT status, COUNT(*) AS count FROM applications GROUP BY status"
+            ).fetchall()
+        by_status = {status: 0 for status in STATUSES}
+        total_applications = 0
+        for row in rows:
+            count = row["count"]
+            total_applications += count
+            label = LEGACY_STATUSES.get(row["status"], row["status"])
+            if label in by_status:
+                by_status[label] += count
+        return jsonify(total_applications=total_applications, by_status=by_status)
+
     @app.get("/applications/<int:application_id>")
     def get_application(application_id):
         with connect_db(app.config["DATABASE"]) as connection:
