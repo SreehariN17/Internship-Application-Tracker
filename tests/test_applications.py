@@ -223,3 +223,49 @@ class ApplicationTests(unittest.TestCase):
             connection.execute("UPDATE applications SET status = ?", ("Assessment",))
         client = create_app({"TESTING": True, "DATABASE": str(old_path)}).test_client()
         self.assertEqual(client.get("/applications/1").json["application"]["status"], "Assessment")
+
+    def test_statistics_empty_database(self):
+        response = self.client.get("/statistics")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, {
+            "total_applications": 0,
+            "by_status": {status: 0 for status in STATUSES},
+        })
+
+    def test_statistics_counts_each_status(self):
+        self.create(status="Applied")
+        self.create(status="Applied")
+        self.create(status="Applied")
+        self.create(status="Interview")
+        self.create(status="Interview")
+        self.create(status="Offer")
+        response = self.client.get("/statistics")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, {
+            "total_applications": 6,
+            "by_status": {
+                "Applied": 3,
+                "Assessment": 0,
+                "Interview": 2,
+                "Offer": 1,
+                "Rejected": 0,
+                "Withdrawn": 0,
+            },
+        })
+
+    def test_statistics_combines_legacy_statuses(self):
+        self.create(status="Applied")
+        legacy = self.create(status="Applied").json["application"]
+        interviewing = self.create(status="Interview").json["application"]
+        with connect_db(self.path) as connection:
+            connection.execute("UPDATE applications SET status = ? WHERE id = ?", ("applied", legacy["id"]))
+            connection.execute(
+                "UPDATE applications SET status = ? WHERE id = ?",
+                ("interviewing", interviewing["id"]),
+            )
+        response = self.client.get("/statistics")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["total_applications"], 3)
+        self.assertEqual(response.json["by_status"]["Applied"], 2)
+        self.assertEqual(response.json["by_status"]["Interview"], 1)
+        self.assertEqual(response.json["by_status"]["Assessment"], 0)
