@@ -1,6 +1,6 @@
 """Flask application and command-line setup."""
 
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 import sqlite3
 
@@ -59,6 +59,33 @@ def validated_body(partial=False):
     if "notes" in data and data["notes"] is not None and not isinstance(data["notes"], str):
         raise ValueError("notes must be a string or null.")
     return data
+
+
+
+def validated_interview_body():
+    try:
+        data = request.get_json()
+    except (BadRequest, UnsupportedMediaType) as error:
+        raise ValueError("Send a valid JSON object.") from error
+
+    if not isinstance(data, dict) or set(data) != {"interview_date", "type"}:
+        raise ValueError("Provide interview_date and type only.")
+
+    for field in ("interview_date", "type"):
+        if not isinstance(data[field], str) or not data[field].strip():
+            raise ValueError(f"{field} must be a non-empty string.")
+
+    try:
+        if "T" in data["interview_date"]:
+            datetime.fromisoformat(data["interview_date"])
+        elif date.fromisoformat(data["interview_date"]).isoformat() != data["interview_date"]:
+            raise ValueError
+    except ValueError as error:
+        raise ValueError("interview_date must be a valid ISO 8601 date or datetime.") from error
+
+    data["type"] = data["type"].strip()
+    return data
+
 
 
 def company_id_for(connection, name):
@@ -203,6 +230,66 @@ def create_app(test_config=None):
         except (sqlite3.Error, OSError) as error:
             raise click.ClickException(f"Database initialization failed: {error}") from error
         click.echo("Database initialized.")
+
+
+    @app.post("/applications/<int:application_id>/interviews")
+    def add_interview(application_id):
+        try:
+            data = validated_interview_body()
+        except ValueError as error:
+            return jsonify(error=str(error)), 400
+
+        with connect_db(app.config["DATABASE"]) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+
+            application = connection.execute(
+                "SELECT id FROM applications WHERE id = ?",
+                (application_id,)
+            ).fetchone()
+
+            if application is None:
+                return jsonify(error="Application not found."), 404
+
+            cursor = connection.execute(
+                "INSERT INTO interviews "
+                "(application_id, interview_date, type) "
+                "VALUES (?, ?, ?)",
+                (application_id, data["interview_date"], data["type"])
+            )
+
+            interview = connection.execute(
+                "SELECT id, application_id, interview_date, type "
+                "FROM interviews WHERE id = ?",
+                (cursor.lastrowid,)
+            ).fetchone()
+
+        return jsonify(interview=dict(interview)), 201
+
+    
+    @app.get("/applications/<int:application_id>/interviews")
+    def list_interviews(application_id):
+        with connect_db(app.config["DATABASE"]) as connection:
+            application = connection.execute(
+                "SELECT id FROM applications WHERE id = ?",
+                (application_id,)
+            ).fetchone()
+
+            if application is None:
+                return jsonify(error="Application not found."), 404
+
+            interviews = connection.execute(
+                "SELECT id, application_id, interview_date, type "
+                "FROM interviews "
+                "WHERE application_id = ? "
+                "ORDER BY interview_date, id",
+                (application_id,)
+            ).fetchall()
+
+        return jsonify(
+            interviews=[dict(row) for row in interviews]
+        ), 200
+
+
 
     return app
 
