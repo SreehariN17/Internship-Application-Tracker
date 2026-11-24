@@ -5,7 +5,7 @@ from pathlib import Path
 import sqlite3
 
 import click
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, render_template, request
 from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 
 from database import connect_db, init_db, migrate_statuses
@@ -75,6 +75,11 @@ def create_app(test_config=None):
     app.config["DATABASE"] = str(Path(app.instance_path) / "tracker.db")
     if test_config is not None:
         app.config.update(test_config)
+
+    @app.get("/")
+    def dashboard():
+        """Serve the read-only application dashboard."""
+        return render_template("index.html")
 
     @app.get("/health")
     def health():
