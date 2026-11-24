@@ -223,3 +223,37 @@ class ApplicationTests(unittest.TestCase):
             connection.execute("UPDATE applications SET status = ?", ("Assessment",))
         client = create_app({"TESTING": True, "DATABASE": str(old_path)}).test_client()
         self.assertEqual(client.get("/applications/1").json["application"]["status"], "Assessment")
+
+
+    def test_create_and_list_interviews(self):
+        application = self.create().json["application"]
+        application_id = application["id"]
+        url = f"/applications/{application_id}/interviews"
+
+        response = self.client.post(url, json={
+            "interview_date": "2026-11-30T14:00:00-05:00",
+            "type": "Technical"
+        })
+
+        self.assertEqual(response.status_code, 201)
+
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json["interviews"]), 1)
+        self.assertEqual(
+            response.json["interviews"][0]["type"],
+            "Technical"
+        )
+
+    def test_interview_errors(self):
+        application_id = self.create().json["application"]["id"]
+        url = f"/applications/{application_id}/interviews"
+
+        response = self.client.post(url, json={
+            "interview_date": "2026-02-30",
+            "type": "Technical"
+        })
+        self.assertEqual(response.status_code, 400)
+
+        response = self.client.get("/applications/99999/interviews")
+        self.assertEqual(response.status_code, 404)
